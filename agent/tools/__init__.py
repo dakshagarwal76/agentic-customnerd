@@ -135,6 +135,24 @@ def tool_search_stackoverflow(
             "domain": "DietNerd" if diet else "CloudNerd",
             "corpus": corpus_label,
         }
+        # DietNerd/legacy: keep gap-fill connected when the first PubMed pull is thin
+        # (same helper the SO cascade path already uses). Without this, weak Diet
+        # retrieval never exercises gap_fill even though the module is installed.
+        try:
+            from retrieval_gap_fill import gap_fill_retrieval
+
+            articles, gap_meta = gap_fill_retrieval(
+                articles,
+                body_text,
+                title,
+                state.max_date,
+                collect_wrapper,
+                cascade_meta,
+            )
+            if gap_meta.get("gap_fill_used"):
+                cascade_meta["gap_fill"] = gap_meta
+        except ImportError:
+            pass
 
     def _article_key(art: dict) -> str:
         if not isinstance(art, dict):
