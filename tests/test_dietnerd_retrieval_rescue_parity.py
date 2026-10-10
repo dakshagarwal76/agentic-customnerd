@@ -66,9 +66,32 @@ def dietnerd_parity_env(monkeypatch):
     monkeypatch.setenv("AGENT_FAITH_FIRST", "true")
 
     # --- domain / bridge ---
-    import agent.tools as tools
+    # CI has no sibling customnerd-backend/ (local machines often do, which hid
+    # this). Stub ensure_legacy on every module that imported it, and point
+    # LEGACY_BACKEND_ROOT at a temp dir so any unpatched call still passes.
+    import tempfile
+    from pathlib import Path
 
-    monkeypatch.setattr(tools, "ensure_legacy_backend", lambda: None)
+    import bridge.legacy as legacy_mod
+    import config as config_mod
+    import agent.tools as tools
+    import agent.tools.assess as assess_mod
+    import agent.tools.organize as organize_mod
+    import agent.tools.search_focus as search_focus_mod
+    import agent.tools.relevance as relevance_mod
+    import agent.faith_policy as faith_policy_mod
+
+    fake_backend = Path(tempfile.mkdtemp(prefix="fake-customnerd-backend-"))
+    monkeypatch.setattr(config_mod, "LEGACY_BACKEND_ROOT", fake_backend)
+    monkeypatch.setattr(legacy_mod, "LEGACY_BACKEND_ROOT", fake_backend)
+
+    def _noop_legacy(*_a, **_k):
+        return fake_backend
+
+    monkeypatch.setattr(legacy_mod, "ensure_legacy_backend", _noop_legacy)
+    for mod in (tools, assess_mod, organize_mod, search_focus_mod, relevance_mod, faith_policy_mod):
+        if hasattr(mod, "ensure_legacy_backend"):
+            monkeypatch.setattr(mod, "ensure_legacy_backend", _noop_legacy)
 
     dom = types.ModuleType("bridge.domain")
     dom.is_dietnerd = lambda: True
