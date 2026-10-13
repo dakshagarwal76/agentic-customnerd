@@ -169,6 +169,34 @@ def test_unknown_model_keeps_tokens_and_omits_cost():
     assert snap["estimated_cost_usd"] is None
 
 
+def test_stage_cost_unknown_price_stays_null():
+    """A stage that mixes a priced call with an unpriced model keeps tokens and nulls cost."""
+    llm_meter.reset()
+
+    def orig(self, *args, **kwargs):
+        del self, args
+        if kwargs["model"] == "gpt-4-turbo":
+            return SimpleNamespace(usage=_usage(100, 10, 110))
+        return SimpleNamespace(usage=_usage(40, 4, 44))
+
+    wrapped = llm_meter.wrap_create(orig, kind="chat")
+    with llm_meter.use_stage("Retrieval"):
+        wrapped(object(), model="gpt-4-turbo")
+        wrapped(object(), model="local-model")
+
+    snap = llm_meter.snapshot()
+    stage = snap["by_stage"]["Retrieval"]
+    assert stage["calls"] == 2
+    assert stage["input_tokens"] == 140
+    assert stage["output_tokens"] == 14
+    assert stage["total_tokens"] == 154
+    assert stage["estimated_cost_usd"] is None
+    assert snap["llm_by_stage"]["Retrieval"]["estimated_cost_usd"] is None
+    assert snap["input_tokens"] == 140
+    assert snap["total_tokens"] == 154
+    assert snap["estimated_cost_usd"] is None
+
+
 def test_stage_inferred_from_caller_name():
     llm_meter.reset()
 

@@ -279,6 +279,7 @@ def _stage_rollup(calls: list[dict], wall: dict) -> dict:
         bucket = rollup.setdefault(name, _empty_stage())
         bucket["wall_seconds"] = round(float(seconds), 4)
     incomplete: set[str] = set()
+    unpriced: set[str] = set()
     for call in calls:
         name = call.get("stage") or "Other"
         bucket = rollup.setdefault(name, _empty_stage())
@@ -292,7 +293,11 @@ def _stage_rollup(calls: list[dict], wall: dict) -> dict:
         bucket["input_tokens"] += int(call["input_tokens"])
         bucket["output_tokens"] += int(call["output_tokens"] or 0)
         bucket["total_tokens"] += int(call["total_tokens"] or 0)
-        if call.get("estimated_cost_usd") is not None:
+        # An unpriced model must not look like a finished stage total.
+        # Keep the known token counts; only the cost becomes null.
+        if call.get("estimated_cost_usd") is None:
+            unpriced.add(name)
+        else:
             bucket["estimated_cost_usd"] = round(
                 bucket["estimated_cost_usd"] + float(call["estimated_cost_usd"]), 5
             )
@@ -300,6 +305,8 @@ def _stage_rollup(calls: list[dict], wall: dict) -> dict:
         rollup[name]["input_tokens"] = None
         rollup[name]["output_tokens"] = None
         rollup[name]["total_tokens"] = None
+        rollup[name]["estimated_cost_usd"] = None
+    for name in unpriced - incomplete:
         rollup[name]["estimated_cost_usd"] = None
     return rollup
 
