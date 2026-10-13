@@ -363,6 +363,7 @@ class _UsageIterator:
     """Pull usage off the last stream chunk, then record the call."""
 
     def __init__(self, inner: Any, finish) -> None:
+        self._source = inner
         self._inner = iter(inner)
         self._finish = finish
         self._usage = None
@@ -386,7 +387,12 @@ class _UsageIterator:
         if self._done:
             return
         self._done = True
-        self._finish(self._usage)
+        try:
+            close = getattr(self._source, "close", None)
+            if close is not None:
+                close()
+        finally:
+            self._finish(self._usage)
 
     def close(self) -> None:
         self._close()

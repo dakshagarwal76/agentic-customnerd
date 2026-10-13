@@ -263,3 +263,42 @@ def test_summary_stays_null_when_any_question_lacks_tokens():
     assert summary["llm_total_tokens_sum"] is None
     assert summary["estimated_cost_usd_sum"] is None
     assert "missing" in summary["token_fields_note"]
+
+
+@pytest.mark.parametrize("mode", ["early", "exhausted", "separate_iterator", "close_error"])
+def test_stream_closes_provider_once_and_records_usage(mode):
+    llm_meter.reset()
+
+    class Stream:
+        def __init__(self):
+            self.close_calls = 0
+            self.chunks = iter([SimpleNamespace(usage=_usage(4, 1, 5))])
+
+        def __iter__(self):
+            return self.chunks if mode == "separate_iterator" else self
+
+        def __next__(self):
+            return next(self.chunks)
+
+        def close(self):
+            self.close_calls += 1
+            if mode == "close_error":
+                raise RuntimeError("close failed")
+
+    stream = Stream()
+    wrapped = llm_meter.wrap_create(lambda self, **kwargs: stream, kind="chat")
+    result = wrapped(object(), model="gpt-4o-mini", stream=True)
+    if mode == "exhausted":
+        list(result)
+    else:
+        next(result)
+    if mode == "close_error":
+        with pytest.raises(RuntimeError, match="close failed"):
+            result.close()
+    else:
+        result.close()
+    result.close()
+    assert stream.close_calls == 1
+    snap = llm_meter.snapshot()
+    assert snap["chat"] == 1
+    assert snap["total_tokens"] == 5
