@@ -6,6 +6,7 @@ import os
 import re
 from typing import Any, Callable, Dict, Optional
 
+from agent.llm_meter import staged
 from bridge.legacy import ensure_legacy_backend
 from agent.state import AgentState
 from agent.tools.relevance import extract_key_terms, mean_domain_overlap
@@ -44,6 +45,7 @@ def _articles_with_answer_body(articles: list) -> int:
     return count
 
 
+@staged("Assess")
 def tool_assess_retrieval(
     state: AgentState,
     *,
@@ -157,6 +159,7 @@ def tool_assess_retrieval(
     return result
 
 
+@staged("Verify")
 def tool_verify_faithfulness(
     state: AgentState,
     *,

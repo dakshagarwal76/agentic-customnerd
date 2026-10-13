@@ -7,6 +7,7 @@ import os
 import re
 from typing import Any, Dict, List, Tuple
 
+from agent.llm_meter import staged
 from agent.state import AgentState
 
 CLAIM_VERIFY_PROMPT = """You verify whether answer claims are supported by evidence passages.
@@ -235,6 +236,7 @@ def _verify_claims_batch(claims: List[str], passages: str) -> List[str]:
         return claims or []
 
 
+@staged("Claim Filter")
 def apply_claim_filter(state: AgentState) -> Tuple[str, Dict[str, Any]]:
     """
     Filter unsupported claims from final_answer.
