@@ -20,6 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import DEFAULT_PORT, load_environment, AGENT_RUN_RETRIES
 from bridge.legacy import ensure_legacy_backend
+from bridge.runtime import isolated_legacy_request, legacy_runtime_lock
 from agent.orchestrator import build_result_object, run_agent
 from agent.state import AgentState
 from agent import llm_meter
@@ -81,7 +82,7 @@ async def health():
 
 
 @app.post("/agent/load_domain")
-async def agent_load_domain(domain: str = Form(...)):
+def agent_load_domain(domain: str = Form(...)):
     """Hot-switch domain pack (DietNerd | CloudNerd | ...) without restarting the process.
 
     Copies saved_states/<domain>/ into customnerd-backend and reloads prompts/search.
@@ -94,7 +95,8 @@ async def agent_load_domain(domain: str = Form(...)):
             detail=f"Domain '{domain}' not found. Available: {list_domains()}",
         )
     try:
-        status = activate_domain(domain, force=True)
+        with legacy_runtime_lock:
+            status = activate_domain(domain, force=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"status": "ok", **status}
@@ -107,6 +109,7 @@ async def sse(session_id: str = Query(default=None)):
     return EventSourceResponse(event_generator(session_id))
 
 
+@isolated_legacy_request
 def _run_agent_logic(
     user_query: str,
     session_id: str,
