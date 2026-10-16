@@ -28,6 +28,8 @@ Rules:
 - Exact commands, errors, versions, dosages, and statistics must appear in passages to be SUPPORTED.
 - Meta-claims about the evidence itself ("the facts do not mention", "not detailed in the provided facts",
   "the evidence does not discuss", "further research is needed") → NOT SUPPORTED.
+- When the passages disagree, a claim that the evidence is mixed, conflicting, inconsistent,
+  heterogeneous, inconclusive, or that not all studies agree is SUPPORTED. Keep that hedge.
 """
 
 _GAP_TALK_RE = re.compile(
@@ -58,15 +60,36 @@ _GAP_TALK_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Closers that zero Rel — only drop when they are NOT carrying study stats.
+# Evidence that the cited studies disagree. Never strip these, even without numbers.
+# "findings are conflicting/mixed/inconclusive" used to live in the closer regex and
+# was deleted unless the sentence also carried a stat, citation, or the word "studies".
+_EVIDENCE_CONFLICT_RE = re.compile(
+    r"\b(?:evidence|findings|results|literature|data|associations?|studies)\b"
+    r"(?:\W+\w+){0,8}\W+"
+    r"\b(?:mixed|conflicting|inconsistent|inconclusive|heterogeneous)\b|"
+    r"\b(?:mixed|conflicting|inconsistent|inconclusive|heterogeneous)\b"
+    r"(?:\W+\w+){0,8}\W+"
+    r"\b(?:evidence|findings|results|literature|data|studies)\b|"
+    r"\b(?:findings|results|evidence|studies) (?:are|were|is|remain|remains) "
+    r"(?:mixed|conflicting|inconsistent|inconclusive|heterogeneous)\b|"
+    r"\bnot all studies\b",
+    re.IGNORECASE,
+)
+
+# Empty closers that zero Rel. Conflict hedges are intentionally not in this pattern.
 _NONCOMMITTAL_CLOSER_RE = re.compile(
     r"\bstill undetermined\b|"
     r"\bcan vary\b|"
-    r"\bresults are mixed\b|"
-    r"\bfindings are (mixed|conflicting|inconclusive)\b|"
     r"\bfurther .{0,60}(trials|studies|research|rcts)\b.{0,20}\bneeded\b|"
     r"\bwell[- ]controlled trials are needed\b|"
     r"\boptimal (quantity|frequency|dose).{0,40}(undetermined|unclear|unknown)\b",
+    re.IGNORECASE,
+)
+
+_DISCLAIMER_SENTENCE_RE = re.compile(
+    r"disclaimer|informational purposes only|not a substitute for professional|"
+    r"always consult|qualified healthcare|"
+    r"consult( with)? (a )?(registered )?(dietitian|nutritionist|healthcare|physician|doctor)",
     re.IGNORECASE,
 )
 
@@ -118,9 +141,11 @@ def strip_disclaimer(answer: str) -> str:
 
 
 def strip_gap_talk_sentences(answer: str) -> str:
-    """Remove gap-talk / meta-evidence / noncommittal-closer sentences.
+    """Remove gap-talk, empty closers, and disclaimer sentences.
 
-    Keep evidence-backed caveats (stats, citations, study n) — stripping those
+    Keep disagreement hedges (mixed, conflicting, inconsistent, heterogeneous,
+    inconclusive, "not all studies") even when they carry no numbers. Keep
+    evidence-backed caveats (stats, citations, study n). Stripping those
     leaves a thin Yes/No lead that RAGAS Faith splits into unsupported claims.
     """
     text = strip_disclaimer(answer or "")
@@ -133,8 +158,16 @@ def strip_gap_talk_sentences(answer: str) -> str:
         if not s:
             continue
         has_detail = bool(_EVIDENCE_DETAIL_RE.search(s))
+        # Disclaimers always drop, even if they also mention mixed evidence.
+        if _DISCLAIMER_SENTENCE_RE.search(s):
+            continue
+        # Disagreement is a finding. Keep it even when the sentence has no
+        # numbers and even when it also contains an empty closer.
+        if _EVIDENCE_CONFLICT_RE.search(s):
+            kept.append(s)
+            continue
         if _GAP_TALK_RE.search(s):
-            # Disclaimer / "further trials needed" always drop.
+            # "Further trials are needed" always drops.
             # Keep the sentence if it is carrying study numbers (Faith).
             if has_detail and not re.search(
                 r"disclaimer|informational purposes|not a substitute|"
@@ -145,7 +178,7 @@ def strip_gap_talk_sentences(answer: str) -> str:
             ):
                 kept.append(s)
             continue
-        # Drop Rel-zeroing closers unless they also state a measured finding.
+        # Drop empty closers unless they also state a measured finding.
         if i > 0 and _NONCOMMITTAL_CLOSER_RE.search(s) and not has_detail:
             continue
         kept.append(s)

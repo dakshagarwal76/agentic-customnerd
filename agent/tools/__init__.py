@@ -248,6 +248,9 @@ def tool_synthesize_answer(
         print_referenced_articles,
         replace_invalid_values,
     )
+    from prompts.synthesis import install_synthesis_conflict_rule
+
+    install_synthesis_conflict_rule()
 
     if not state.relevant_articles and state.rescued_count == 0:
         if state.search_attempts < state.max_search_attempts:
