@@ -1,9 +1,24 @@
 # Legacy runtime isolation
 
-The backend serves queries with four worker threads, but the legacy pipeline and LLM meter use process-global state. A second worker can reset another request's telemetry, and a domain switch can replace prompts/retrieval modules during a query.
+The legacy backend has process-global domain modules and a shared usage meter.
+`run_agent` and `activate_domain` acquire the same reentrant process lock, so
+startup and evaluation callers cannot bypass serialization. The HTTP worker
+also holds it across meter reset, retries, execution and result construction.
+Callers that manage their own global meter reset or result construction must
+hold `isolated_legacy_request` around that whole unit too. A lock inside
+`run_agent` cannot protect code executed by its caller outside that function.
 
-A shared process-local lock now covers the complete agent worker and the domain-switch mutation. The switch endpoint is synchronous so FastAPI runs its blocking lock wait in a worker instead of stopping the event loop. SSE delivery remains outside this lock.
+`AGENT_RUNTIME_LOCK_TIMEOUT_SECONDS` defaults to 30 seconds and accepts a finite
+number greater than zero and no more than 300. This is a local proposed default,
+not a measured service-level target. A waiting call raises `LegacyRuntimeBusy`
+without entering the protected operation. The domain HTTP endpoint returns 503;
+the background worker emits a terminal error result so SSE clients do not wait
+forever. Nested calls by the current owner are allowed.
 
-This is a conservative serialization guard, not parallel request isolation. Queries wait for the preceding query; throughput is lower. It does not isolate separate server processes sharing the legacy files. Every caller that mutates those files must use the same lock. Health reads and direct evaluation helpers are not protected by the endpoint guard. There is no queue limit or cancellation mechanism added.
+This is only an acquisition deadline. It does not cancel a provider call or
+release a lock held by a hung owner. Releasing another call's lock would allow
+corruption. Provider deadlines and per-request backend/meter state are separate
+work. Separate processes do not share this lock.
 
-Offline tests cover two overlapping workers with distinct meter counts, lock release after an error, and AST wiring of the worker/domain endpoint. Twenty repeated before/after replays change from 0/20 to 20/20 separate meter totals. No model calls, production data, deployment or live scientific evaluation is involved.
+Offline tests stub pipelines and filesystem work. They demonstrate exclusion,
+timeout handling and reentrancy, not provider reliability or production capacity.

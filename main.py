@@ -20,7 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import DEFAULT_PORT, load_environment, AGENT_RUN_RETRIES
 from bridge.legacy import ensure_legacy_backend
-from bridge.runtime import isolated_legacy_request, legacy_runtime_lock
+from bridge.runtime import isolated_legacy_request, LegacyRuntimeBusy
 from agent.orchestrator import build_result_object, run_agent
 from agent.state import AgentState
 from agent import llm_meter
@@ -95,8 +95,9 @@ def agent_load_domain(domain: str = Form(...)):
             detail=f"Domain '{domain}' not found. Available: {list_domains()}",
         )
     try:
-        with legacy_runtime_lock:
-            status = activate_domain(domain, force=True)
+        status = activate_domain(domain, force=True)
+    except LegacyRuntimeBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"status": "ok", **status}
@@ -109,13 +110,23 @@ async def sse(session_id: str = Query(default=None)):
     return EventSourceResponse(event_generator(session_id))
 
 
-@isolated_legacy_request
 def _run_agent_logic(
     user_query: str,
     session_id: str,
     max_date: Optional[str],
     query_title: Optional[str],
 ) -> None:
+    try:
+        _run_agent_logic_locked(user_query, session_id, max_date, query_title)
+    except LegacyRuntimeBusy as exc:
+        send_update_sync(session_id, {
+            "end_output": str(exc), "final_output": str(exc),
+            "citations_obj": [], "agent_backend": "cloudnerd-agent-backend",
+        })
+
+
+@isolated_legacy_request
+def _run_agent_logic_locked(user_query, session_id, max_date, query_title):
     def progress(msg: str) -> None:
         send_update_sync(session_id, msg)
 
