@@ -10,6 +10,7 @@ import os
 import re
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.llm_meter import staged
 from bridge.legacy import ensure_legacy_backend
 from agent.state import AgentState
 
@@ -328,6 +329,7 @@ def cap_raw_articles_for_organize(articles: List[dict], query: str) -> List[dict
     return ranked[:max_n]
 
 
+@staged("Organize")
 def tool_organize_articles(
     state: AgentState,
     *,

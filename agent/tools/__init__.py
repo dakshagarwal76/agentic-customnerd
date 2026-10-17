@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.llm_meter import staged
 from bridge.legacy import ensure_legacy_backend
 from bridge.collect import collect_with_fallback
 from agent.state import AgentState
@@ -38,6 +39,7 @@ def _emit(on_progress: ProgressFn, message: str) -> None:
         on_progress(message)
 
 
+@staged("Retrieval")
 def tool_search_stackoverflow(
     state: AgentState,
     *,
@@ -47,10 +49,10 @@ def tool_search_stackoverflow(
 ) -> Dict[str, Any]:
     """Run retrieval against the active domain corpus (SO cascade or PubMed legacy)."""
     ensure_legacy_backend()
-    from bridge.domain import is_dietnerd
+    from bridge.adapters import get_active_adapter
 
-    diet = is_dietnerd()
-    corpus_label = "PubMed" if diet else "Stack Overflow"
+    adapter = get_active_adapter()
+    corpus_label = adapter.corpus_label
 
     state.search_attempts += 1
     query_text = (search_focus or state.user_query).strip()
@@ -64,11 +66,7 @@ def tool_search_stackoverflow(
     body_text, title = cascade_body_for_tier(state, query_text, tier_hint)
     tier_only = tier_hint if is_deterministic_ladder() else None
 
-    _emit(
-        on_progress,
-        f"Agent: searching {corpus_label} ({body_text[:80]}...) "
-        f"tier={tier_hint or ('legacy' if diet else 'strict')}",
-    )
+    _emit(on_progress, adapter.search_progress(body_text, tier_hint))
 
     def collect_wrapper(query_list, max_date=None, **kwargs):
         return collect_with_fallback(query_list, max_date=max_date, **kwargs)
@@ -77,98 +75,20 @@ def tool_search_stackoverflow(
 
     def on_plane(plane: dict) -> None:
         planes.append(plane)
-        flag = "WIN" if plane.get("success") else (
-            "EXTEND" if plane.get("extension_triggered") else "try"
-        )
-        _emit(
-            on_progress,
-            f"Cascade plane {plane.get('plane')}: {plane.get('tier')}/{plane.get('step')} "
-            f"[{flag}] queries={plane.get('queries_count')} articles={plane.get('articles_found')}",
-        )
+        _emit(on_progress, adapter.plane_progress(plane))
 
-    # DietNerd / PubMed: always legacy query_generation + Entrez collect.
-    # SO cascade assumes Stack Overflow tags, clean_query JSON, and SO schemas.
-    use_cascade = False
-    cascade_meta: Dict[str, Any] = {}
-    articles: List[dict] = []
-    if not diet:
-        from retrieval_cascade import (
-            cascade_collect_articles,
-            is_cascade_mode,
-            articles_to_source_counts,
-        )
-
-        use_cascade = is_cascade_mode()
-        if use_cascade:
-            articles, cascade_meta = cascade_collect_articles(
-                body_text,
-                title,
-                state.max_date,
-                collect_wrapper,
-                on_plane=on_plane,
-                tier_only=tier_only,
-            )
-            try:
-                from retrieval_gap_fill import gap_fill_retrieval
-
-                articles, gap_meta = gap_fill_retrieval(
-                    articles,
-                    body_text,
-                    title,
-                    state.max_date,
-                    collect_wrapper,
-                    cascade_meta,
-                )
-                if gap_meta.get("gap_fill_used"):
-                    cascade_meta["gap_fill"] = gap_meta
-            except ImportError:
-                pass
-
-    if diet or not use_cascade:
-        from helper_functions import query_generation
-
-        _, _, query_list = query_generation(body_text)
-        articles = collect_wrapper(query_list, max_date=state.max_date) or []
-        cascade_meta = {
-            "retrieval_mode": "legacy",
-            "extension_planes": planes,
-            "domain": "DietNerd" if diet else "CloudNerd",
-            "corpus": corpus_label,
-        }
-        # DietNerd/legacy: keep gap-fill connected when the first PubMed pull is thin
-        # (same helper the SO cascade path already uses). Without this, weak Diet
-        # retrieval never exercises gap_fill even though the module is installed.
-        try:
-            from retrieval_gap_fill import gap_fill_retrieval
-
-            articles, gap_meta = gap_fill_retrieval(
-                articles,
-                body_text,
-                title,
-                state.max_date,
-                collect_wrapper,
-                cascade_meta,
-            )
-            if gap_meta.get("gap_fill_used"):
-                cascade_meta["gap_fill"] = gap_meta
-        except ImportError:
-            pass
+    articles, cascade_meta = adapter.retrieve(
+        body_text=body_text,
+        title=title,
+        max_date=state.max_date,
+        collect=collect_wrapper,
+        on_plane=on_plane,
+        planes=planes,
+        tier_only=tier_only,
+    )
 
     def _article_key(art: dict) -> str:
-        if not isinstance(art, dict):
-            return str(id(art))
-        # PubMed Entrez XML (pre-organize)
-        try:
-            pmid = art.get("MedlineCitation", {}).get("PMID")
-            if pmid:
-                return f"pmid:{pmid}"
-        except Exception:
-            pass
-        for k in ("PMID", "pmid", "id", "answer_id", "question_id", "link", "url", "title"):
-            val = art.get(k) if isinstance(art, dict) else None
-            if val:
-                return f"{k}:{val}"
-        return str(id(art))
+        return adapter.source_id(art)
 
     seen: set[str] = set()
     merged: List[dict] = []
@@ -202,7 +122,7 @@ def tool_search_stackoverflow(
 
         source_counts = articles_to_source_counts(merged) if merged else {}
     except Exception:
-        source_counts = {"pubmed": len(merged)} if diet else {}
+        source_counts = {"pubmed": len(merged)} if adapter.name == "DietNerd" else {}
 
     state.log_step(
         "search_stackoverflow",
@@ -211,10 +131,10 @@ def tool_search_stackoverflow(
             "new_unique": new_only,
             "total": len(merged),
             "attempt": state.search_attempts,
-            "tier_hint": tier_hint or ("legacy" if diet else "strict"),
+            "tier_hint": tier_hint or adapter.default_tier,
             "search_focus": query_text[:120],
             "corpus": corpus_label,
-            "domain": "DietNerd" if diet else "CloudNerd",
+            "domain": adapter.name,
             "skipped_reprocess": skip_reprocess,
         },
     )
@@ -226,12 +146,13 @@ def tool_search_stackoverflow(
         "retrieval_mode": cascade_meta.get("retrieval_mode") if cascade_meta else "legacy",
         "source_counts": source_counts,
         "search_attempts": state.search_attempts,
-        "tier_hint": tier_hint or ("legacy" if diet else "strict"),
+        "tier_hint": tier_hint or adapter.default_tier,
         "corpus": corpus_label,
         "skipped_reprocess": skip_reprocess,
     }
 
 
+@staged("Relevance")
 def tool_classify_relevance(
     state: AgentState,
     *,
@@ -312,6 +233,7 @@ def tool_classify_relevance(
     }
 
 
+@staged("Final Answer")
 def tool_synthesize_answer(
     state: AgentState,
     *,
@@ -326,6 +248,9 @@ def tool_synthesize_answer(
         print_referenced_articles,
         replace_invalid_values,
     )
+    from prompts.synthesis import install_synthesis_conflict_rule
+
+    install_synthesis_conflict_rule()
 
     if not state.relevant_articles and state.rescued_count == 0:
         if state.search_attempts < state.max_search_attempts:
