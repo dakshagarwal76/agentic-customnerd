@@ -12,6 +12,7 @@ from openai import OpenAI
 from config import AGENT_MODEL, AGENT_MODE, MAX_AGENT_STEPS, MAX_SEARCH_ATTEMPTS, USE_LANGGRAPH
 from agent.faith_policy import is_faith_first
 from agent.state import AgentState
+from bridge.runtime import isolated_legacy_request
 from agent.tools import TOOL_DEFINITIONS, dispatch_tool, tool_assess_retrieval
 from agent.pipeline import run_parity_pipeline, run_enhanced_pipeline
 from prompts.agent_system import AGENT_SYSTEM_PROMPT, get_agent_system_prompt
@@ -147,6 +148,7 @@ def _fallback_tool_chain(
         state.done = True
 
 
+@isolated_legacy_request
 def run_agent(
     state: AgentState,
     *,

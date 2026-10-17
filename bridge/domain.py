@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from config import LEGACY_BACKEND_ROOT
+from bridge.runtime import isolated_legacy_request
 
 logger = logging.getLogger("cloudnerd-agent.domain")
 
@@ -108,6 +109,7 @@ def apply_domain_defaults(domain: Optional[str] = None) -> None:
         os.environ.setdefault("AGENT_FAST_ORGANIZE", "true")
 
 
+@isolated_legacy_request
 def activate_domain(domain: Optional[str] = None, *, force: bool = True) -> dict:
     """Copy saved-state files into live backend and reload domain modules.
 
