@@ -59,6 +59,16 @@ def test_empty_retrieval():
     assert retrieve([])[0][0] == []
 
 
+def test_matching_article_versions_keep_the_newest():
+    old = article("2401.12345v1")
+    new = article("2401.12345v3")
+    (rows, _), _ = retrieve([old, new])
+    assert rows == [new]
+
+    (rows, _), _ = retrieve([new, old])
+    assert rows == [new]
+
+
 def test_cutoff_forwarded_and_enforced():
     (rows, _), calls = retrieve([article()], "2024-01-11")
     assert rows == []

@@ -10,7 +10,15 @@ from urllib.parse import urlparse
 _ARXIV_ID = re.compile(
     r"(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v[1-9]\d*)?\Z"
 )
+_ARXIV_VERSION = re.compile(r"v([1-9]\d*)\Z")
 _ARXIV_HOSTS = {"arxiv.org", "www.arxiv.org"}
+
+
+def _article_version(ident: str) -> tuple[str, int]:
+    match = _ARXIV_VERSION.search(ident)
+    if not match:
+        return ident, 0
+    return ident[: match.start()], int(match.group(1))
 
 
 def _article_id(article: Any) -> str:
@@ -71,7 +79,7 @@ class WirelessChatAdapter:
         if not isinstance(found, list):
             raise ValueError("WirelessChat collector must return a list of source articles")
 
-        articles, seen = [], set()
+        articles, seen = [], {}
         for article in found:
             key = self.source_id(article)
             if not all(
@@ -85,9 +93,14 @@ class WirelessChatAdapter:
                     raise ValueError("WirelessChat cutoff requires a publication date")
                 if date.fromisoformat(published[:10]) > cutoff:
                     continue
-            if key not in seen:
-                seen.add(key)
+            canonical, version = _article_version(key)
+            previous = seen.get(canonical)
+            if previous is None:
+                seen[canonical] = (version, len(articles))
                 articles.append(article)
+            elif version > previous[0]:
+                articles[previous[1]] = article
+                seen[canonical] = (version, previous[1])
 
         return articles, {
             "retrieval_mode": "legacy",
