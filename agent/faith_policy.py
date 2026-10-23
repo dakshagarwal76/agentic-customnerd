@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 
 from agent.state import AgentState
+from prompts.synthesis import SYNTHESIS_CONFLICT_RULE
 
 ProgressFn = Optional[Callable[[str], None]]
 
@@ -466,7 +467,8 @@ Rules (strict extractive):
 - Do NOT invent full code samples. Short quoted fragments from passages are OK.
 - If passages are only partly related, say what they do establish — do not fill gaps from general knowledge.
 - Forbidden phrasing: "closest retrieved posts", "evidence does not mention", "I could not find".
-- Output only the answer text."""
+- Output only the answer text.
+""" + SYNTHESIS_CONFLICT_RULE
 
 
 def _fallback_passages(articles: List[dict], *, max_articles: int = 4, max_chars: int = 9000) -> str:
