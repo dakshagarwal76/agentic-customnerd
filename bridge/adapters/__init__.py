@@ -6,6 +6,8 @@ not selected, so today's CloudNerd / DietNerd routing stays unchanged.
 
 from __future__ import annotations
 
+import os
+
 from bridge.adapters.base import DomainAdapter
 from bridge.adapters.cloudnerd import CloudNerdAdapter
 from bridge.adapters.dietnerd import DietNerdAdapter
@@ -25,9 +27,15 @@ def get_active_adapter() -> DomainAdapter:
 
     Selection matches the historical `is_dietnerd()` branch: PubMed legacy for
     DietNerd, Stack Overflow cascade otherwise. WirelessChat is registered on
-    the contract only.
+    the contract only; selecting it raises instead of falling back to CloudNerd.
     """
     from bridge.domain import is_dietnerd
+
+    domain = (os.getenv("AGENT_DOMAIN") or os.getenv("NERD_DOMAIN") or "").strip()
+    if domain == "WirelessChat":
+        raise RuntimeError(
+            "WirelessChat requires a compatible backend pack; live routing is not enabled"
+        )
 
     if is_dietnerd():
         return DietNerdAdapter()

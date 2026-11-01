@@ -59,24 +59,24 @@ def test_active_adapter_follows_diet_flag(monkeypatch):
     monkeypatch.setattr(domain, "is_dietnerd", lambda: True)
     assert isinstance(get_active_adapter(), DietNerdAdapter)
     monkeypatch.setattr(domain, "is_dietnerd", lambda: False)
-    monkeypatch.setenv("AGENT_DOMAIN", "WirelessChat")
+    monkeypatch.setenv("AGENT_DOMAIN", "CloudNerd")
     assert isinstance(get_active_adapter(), CloudNerdAdapter)
 
 
 def test_wireless_source_id_and_retrieve_not_wired():
     adapter = WirelessChatAdapter()
-    assert adapter.source_id({"message_id": "m1", "PMID": "9"}) == "message_id:m1"
-    assert adapter.source_id({"doc_id": "d2"}) == "doc_id:d2"
-    assert adapter.search_progress("wifi latency", None).startswith("Agent: searching Wireless")
-    with pytest.raises(NotImplementedError):
-        adapter.retrieve(
-            body_text="q",
-            title=None,
-            max_date=None,
-            collect=lambda *a, **k: [],
-            on_plane=lambda plane: None,
-            planes=[],
-        )
+    assert adapter.source_id({"id": "2401.12345"}) == "2401.12345"
+    assert adapter.source_id({"url": "https://arxiv.org/abs/2401.12345"}) == "2401.12345"
+    assert adapter.search_progress("wifi latency", None).startswith("Agent: searching arXiv")
+    articles, meta = adapter.retrieve(
+        body_text="q",
+        title=None,
+        max_date=None,
+        collect=lambda *a, **k: [],
+        on_plane=lambda plane: None,
+        planes=[],
+    )
+    assert articles == [] and meta["corpus"] == "arXiv"
 
 
 def test_dietnerd_retrieve_keeps_legacy_and_gap_fill(monkeypatch):

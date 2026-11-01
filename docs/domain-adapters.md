@@ -21,7 +21,9 @@ DietNerd and CloudNerd share one agent pipeline. They do not share a corpus. A d
 
 ## WirelessChat
 
-`WirelessChatAdapter` documents the next pack. Source ids prefer `message_id`, then `doc_id`, then `id`. `retrieve` is not implemented, and `get_active_adapter()` will not return this class. Wiring it means a real retriever plus progress strings, without reusing PubMed PMIDs or the Stack Overflow cascade.
+`WirelessChatAdapter` accepts arXiv article dictionaries from an injected collector. It passes the raw question as a one-element query list, forwards `max_date`, checks source identifiers/title/summary, deduplicates article versions to the newest supplied version, and enforces a supplied publication-date cutoff. IDs and URLs must agree. Unknown dates with a cutoff fail closed. It does not call query generation, the answer-generation HTTP endpoint, PubMed or the Stack Overflow cascade.
+
+This is an offline article contract, not an end-to-end WirelessChat integration. The legacy WirelessNerd repository uses `fetch_arxiv_articles`, not the CustomNerd `collect_articles` bridge. Its query generation makes paid calls. A compatible saved-state collector still needs to be supplied and verified. Explicit `AGENT_DOMAIN=WirelessChat` therefore raises a configuration error rather than silently selecting CloudNerd. DietNerd and CloudNerd routing remains unchanged. The `tdocs` and `tstr` answer lanes are not article retrievers and are outside this adapter.
 
 ## Adding a pack
 
